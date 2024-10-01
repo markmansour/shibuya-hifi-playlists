@@ -1,4 +1,4 @@
-# Getting the list of albumns
+# Getting the list of albums
 1. Select all the text on the HTML page: https://www.shibuyahifi.com/schedule-hifi
 2. Use ChatGPT to create a list of albumns
 ```text
