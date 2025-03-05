@@ -28,3 +28,7 @@ download the playlist to the `./data/` directory.
 ```bash
 poetry run python ./src/shibuyahifi-uploader.py --input-file ./data/playlist-data-20250203.csv 
 ```
+
+# Notes for me
+### Automating the downloading of text
+Can I use something like `https://pypi.org/project/html2text/` to pull down the data and then work with claude to build a repeatable parser?
