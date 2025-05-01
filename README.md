@@ -4,8 +4,10 @@
 brew install html2text
 backupfile=shibuya-schedule-$(date -u +"%Y-%m-%d").html
 textfile=shibuya-schedule-$(date -u +"%Y-%m-%d").txt
+csvfile=./data/shibuya-schedule-$(date -u +"%Y-%m-%d").csv
 curl https://www.shibuyahifi.com/schedule-hifi -o $backupfile
 html2text $backupfile > $textfile
+cat $textfile | pbcopy
 ```
 
 ###  Convert listing to python datastructure
@@ -23,10 +25,13 @@ OR
 ```
 
 download the playlist to the `./data/` directory. 
+```
+pbpaste > $csvfile
+```
 
 # Usage
 ```bash
-poetry run python ./src/shibuyahifi-uploader.py --input-file ./data/playlist-data-20250203.csv 
+poetry run python ./src/shibuyahifi-uploader.py --input-file $csvfile
 ```
 
 # Notes for me
