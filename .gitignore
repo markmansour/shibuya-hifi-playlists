@@ -1,3 +1,6 @@
 .env
 .idea/*
 poetry.lock
+*.html
+*.txt
+.cache
