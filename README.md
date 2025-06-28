@@ -1,3 +1,22 @@
+# The way
+The `create_new_playlist.sh` command will
+1. Scrape the album data from the Shibuya Lounge website to a html file
+2. Convert the html file into text for easier parsing by `llm`
+2. Write out a prospective playlist for a month to a CSV file - either the current month or specify the target month
+3. create a Spotify playlist using the newly created CSV as input
+
+e.g.
+```./create_new_playlist.sh --month July```
+
+# Requirements
+* `html2text`
+* `llm`
+* Python and Poetry
+
+
+---
+
+# The old way
 # Getting the list of albums
 ### Grab the listing (automated)
 ```bash
