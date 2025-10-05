@@ -104,7 +104,7 @@ def main():
             month_year = first_date.strftime('%B %Y')
         except (KeyError, ValueError, IndexError):
             month_year = datetime.now().strftime('%B %Y')
-        playlist_name = f"Shibuya iHi-fi room, {month_year}"
+        playlist_name = f"Shibuya Hi-fi room, {month_year}"
     else:
         playlist_name = args.playlist_name
 
