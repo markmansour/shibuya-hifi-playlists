@@ -82,7 +82,7 @@ check_dependencies() {
 # Download the webpage
 download_webpage() {
     log_message "Downloading webpage to $backupfile..."
-    if curl -s --fail https://www.shibuyahifi.com/schedule-hifi -o "$backupfile"; then
+    if curl -s -L --fail https://www.shibuyahifi.com/hifi-schedule -o "$backupfile"; then
 	log_message "Download successful."
     else
 	log_message "ERROR: Failed to download webpage."
@@ -173,10 +173,11 @@ date,artist,album,year
 
     # Run llm with Claude 4 Sonnet and capture its response
     log_message "Running llm with claude-4-sonnet..."
-    if cat "$textfile" | llm -m claude-4-sonnet -s "$actual_prompt" > "$llm_output_file"; then
+    if cat "$textfile" | llm -m claude-4-opus -s "$actual_prompt" > "$llm_output_file"; then
 	log_message "LLM processing successful. Full response saved to $llm_output_file"
     else
 	log_message "ERROR: LLM parsing failed."
+
 	exit 1
     fi
 
