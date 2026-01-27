@@ -187,8 +187,20 @@ date,artist,album,year
 	exit 1
     fi
 
-    # Copy the output to the CSV file (llm should already return just the CSV)
-    cat "$llm_output_file" > "$csvfile"
+    # Extract CSV from LLM output, handling markdown code blocks
+    log_message "Extracting CSV data from LLM response..."
+    if grep -q '```' "$llm_output_file"; then
+	# LLM wrapped CSV in markdown code blocks - extract content between fences
+	log_message "Detected markdown code blocks, extracting CSV content..."
+	sed -n '/```csv/,/```/p' "$llm_output_file" | sed '1d;$d' > "$csvfile"
+	# If no ```csv block found, try generic ``` blocks
+	if [[ ! -s "$csvfile" ]]; then
+	    sed -n '/```/,/```/p' "$llm_output_file" | sed '1d;$d' > "$csvfile"
+	fi
+    else
+	# No markdown blocks, copy the output directly
+	cat "$llm_output_file" > "$csvfile"
+    fi
 
     # Create debug script for re-running this step
     create_debug_script
