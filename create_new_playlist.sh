@@ -262,11 +262,14 @@ show_help() {
     echo "  --month <Month>              Specify the target month (e.g., 'January')"
     echo "  --year <YYYY>                Specify the target year (e.g., '2025')"
     echo "  --html-file <path>           Use local HTML file instead of downloading"
+    echo "  --csv-file <path>            Create playlist directly from CSV file (skips all parsing)"
     echo "  --help                       Show this help message"
     echo ""
     echo "Examples:"
     echo "  $0 --month July --year 2025  Create a playlist for July 2025"
     echo "  $0 --html-file schedule.html Use a local HTML file"
+    echo "  $0 --csv-file data.csv --month February --year 2026"
+    echo "                               Create playlist directly from CSV"
     echo "  $0                           Create a playlist for the current month and year"
 }
 
@@ -320,6 +323,19 @@ main() {
 		local_html_file="$2"
 		shift 2
 		;;
+	    --csv-file)
+		if [[ $# -lt 2 ]]; then
+		    echo "ERROR: Missing value for --csv-file parameter"
+		    show_help
+		    exit 1
+		fi
+		if [[ ! -f "$2" ]]; then
+		    echo "ERROR: CSV file not found: $2"
+		    exit 1
+		fi
+		local_csv_file="$2"
+		shift 2
+		;;
 	    --help)
 		show_help
 		exit 0
@@ -338,7 +354,14 @@ main() {
     llm_output_file="./logs/llm-output-${target_month}-${target_year}-${date_stamp}.txt"
     llm_debug_script="./logs/debug-llm-${target_month}-${target_year}-${date_stamp}.sh"
 
-    if [[ -v parse_only ]]; then
+    if [[ -v local_csv_file ]]; then
+	# CSV file provided - skip all parsing and go straight to upload
+	log_message "Using local CSV file: $local_csv_file"
+	log_message "Creating playlist for ${target_month} ${target_year}"
+	csvfile="$local_csv_file"
+	upload_to_spotify
+	log_message "Playlist created successfully."
+    elif [[ -v parse_only ]]; then
 	log_message "Running parse-only mode (assuming files exist)"
 	parse_with_llm
     else

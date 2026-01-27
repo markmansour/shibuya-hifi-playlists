@@ -96,14 +96,15 @@ def main():
         print(f"Error loading playlist data: {e}")
         return
 
+    # Determine month_year for description (always needed)
+    try:
+        first_date = datetime.strptime(albums[0]['date'], '%A %b %d, %Y %I:%M %p')
+        month_year = first_date.strftime('%B %Y')
+    except (KeyError, ValueError, IndexError):
+        month_year = datetime.now().strftime('%B %Y')
+
     # Generate default playlist name if not provided
     if not args.playlist_name:
-        # Try to get date from first album, fallback to current month
-        try:
-            first_date = datetime.strptime(albums[0]['date'], '%A %b %d, %Y %I:%M %p')
-            month_year = first_date.strftime('%B %Y')
-        except (KeyError, ValueError, IndexError):
-            month_year = datetime.now().strftime('%B %Y')
         playlist_name = f"Shibuya Hi-fi room, {month_year}"
     else:
         playlist_name = args.playlist_name
