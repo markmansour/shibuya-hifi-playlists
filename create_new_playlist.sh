@@ -232,7 +232,8 @@ date,artist,album,year
 # Upload to Spotify
 upload_to_spotify() {
     log_message "Uploading to Spotify..."
-    if poetry run python ./src/shibuyahifi-uploader.py --input-file "$csvfile"; then
+    playlist_name="Shibuya Hi-fi room, ${target_month} ${target_year}"
+    if poetry run python ./src/shibuyahifi-uploader.py --input-file "$csvfile" --playlist-name "$playlist_name"; then
 	log_message "Spotify upload successful."
     else
 	log_message "ERROR: Spotify upload failed."
