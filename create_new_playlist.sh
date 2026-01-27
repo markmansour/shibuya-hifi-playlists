@@ -79,14 +79,20 @@ check_dependencies() {
     log_message "All dependencies satisfied."
 }
 
-# Download the webpage
+# Download the webpage or use local file
 download_webpage() {
-    log_message "Downloading webpage to $backupfile..."
-    if curl -s -L --fail https://www.shibuyahifi.com/hifi-schedule -o "$backupfile"; then
-	log_message "Download successful."
+    if [[ -v local_html_file ]]; then
+	log_message "Using local HTML file: $local_html_file"
+	backupfile="$local_html_file"
+	log_message "Skipping download step."
     else
-	log_message "ERROR: Failed to download webpage."
-	exit 1
+	log_message "Downloading webpage to $backupfile..."
+	if curl -s -L --fail https://www.shibuyahifi.com/hifi-schedule -o "$backupfile"; then
+	    log_message "Download successful."
+	else
+	    log_message "ERROR: Failed to download webpage."
+	    exit 1
+	fi
     fi
 }
 
@@ -226,7 +232,11 @@ upload_to_spotify() {
 cleanup() {
     log_message "Cleaning up temporary files..."
     # Only remove the HTML and text files, keep logs and debug files
-    rm -f "$backupfile" "$textfile"
+    # Don't delete the HTML file if it was provided locally
+    if [[ ! -v local_html_file ]]; then
+	rm -f "$backupfile"
+    fi
+    rm -f "$textfile"
     log_message "Cleanup complete. Kept debug files for troubleshooting."
     log_message "To debug LLM parsing, run: $llm_debug_script"
 }
@@ -238,10 +248,12 @@ show_help() {
     echo "  --parse-only                 Run only the LLM parsing step (assumes text file exists)"
     echo "  --month <Month>              Specify the target month (e.g., 'January')"
     echo "  --year <YYYY>                Specify the target year (e.g., '2025')"
+    echo "  --html-file <path>           Use local HTML file instead of downloading"
     echo "  --help                       Show this help message"
     echo ""
     echo "Examples:"
     echo "  $0 --month July --year 2025  Create a playlist for July 2025"
+    echo "  $0 --html-file schedule.html Use a local HTML file"
     echo "  $0                           Create a playlist for the current month and year"
 }
 
@@ -280,6 +292,19 @@ main() {
 		    echo "ERROR: Invalid year. Please use a 4-digit year between 2020-2030"
 		    exit 1
 		fi
+		shift 2
+		;;
+	    --html-file)
+		if [[ $# -lt 2 ]]; then
+		    echo "ERROR: Missing value for --html-file parameter"
+		    show_help
+		    exit 1
+		fi
+		if [[ ! -f "$2" ]]; then
+		    echo "ERROR: HTML file not found: $2"
+		    exit 1
+		fi
+		local_html_file="$2"
 		shift 2
 		;;
 	    --help)
