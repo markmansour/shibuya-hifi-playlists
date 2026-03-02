@@ -3,6 +3,11 @@
 # Exit on error, unset variable, or pipe failure
 set -euo pipefail
 
+# Load environment variables from .env
+if [[ -f .env ]]; then
+    export $(cat .env | grep -v '^#' | xargs)
+fi
+
 # Create directories if they don't exist
 mkdir -p ./data
 mkdir -p ./logs
@@ -20,6 +25,7 @@ logfile="./logs/script-execution-${date_stamp}.log"
 llm_input_file="./logs/llm-input-${date_stamp}.txt"
 llm_output_file="./logs/llm-output-${date_stamp}.txt"
 llm_debug_script="./logs/debug-llm-${date_stamp}.sh"
+llm_model="claude-4-opus"
 
 # Function to log messages
 log_message() {
@@ -122,7 +128,7 @@ target_year="$target_year"
 
 # This script allows you to re-run just the LLM parsing step for debugging
 echo "Running llm with saved input..."
-cat "$llm_input_file" | sed "s/TARGET_MONTH/\$target_month/g" | sed "s/TARGET_YEAR/\$target_year/g" | llm -m claude-4-sonnet > "$llm_output_file.new"
+cat "$llm_input_file" | sed "s/TARGET_MONTH/\$target_month/g" | sed "s/TARGET_YEAR/\$target_year/g" | llm -m "$llm_model" > "$llm_output_file.new"
 
 echo "\nProcessing output to extract CSV..."
 if grep -q "date,artist,album,year" "$llm_output_file.new"; then
@@ -233,7 +239,12 @@ date,artist,album,year
 upload_to_spotify() {
     log_message "Uploading to Spotify..."
     playlist_name="Shibuya Hi-fi room, ${target_month} ${target_year}"
-    if poetry run python ./src/shibuyahifi-uploader.py --input-file "$csvfile" --playlist-name "$playlist_name"; then
+    dry_run_flag=""
+    if [[ -v dry_run ]]; then
+        dry_run_flag="--dry-run"
+        log_message "Dry run mode enabled - no playlist will be created"
+    fi
+    if poetry run python ./src/shibuyahifi-uploader.py --input-file "$csvfile" --playlist-name "$playlist_name" $dry_run_flag; then
 	log_message "Spotify upload successful."
     else
 	log_message "ERROR: Spotify upload failed."
@@ -263,6 +274,7 @@ show_help() {
     echo "  --year <YYYY>                Specify the target year (e.g., '2025')"
     echo "  --html-file <path>           Use local HTML file instead of downloading"
     echo "  --csv-file <path>            Create playlist directly from CSV file (skips all parsing)"
+    echo "  --dry-run                    Search Spotify without creating playlist or adding tracks"
     echo "  --help                       Show this help message"
     echo ""
     echo "Examples:"
@@ -278,6 +290,10 @@ main() {
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
 	case "$1" in
+	    --dry-run)
+		dry_run=true
+		shift
+		;;
 	    --parse-only)
 		parse_only=true
 		shift

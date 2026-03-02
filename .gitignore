@@ -4,4 +4,10 @@ poetry.lock
 *.html
 *.txt
 .cache
+.search_cache.pkl
 logs
+__pycache__/
+*.pyc
+.DS_Store
+simple_search.py
+test_spotify_auth.py
