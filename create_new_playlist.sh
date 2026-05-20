@@ -11,6 +11,7 @@ fi
 # Create directories if they don't exist
 mkdir -p ./data
 mkdir -p ./logs
+mkdir -p ./tmp
 
 # Default to current month and year if not specified via command line
 target_month=$(date +"%B")
@@ -18,8 +19,8 @@ target_year=$(date +"%Y")
 
 # Generate filenames with timestamps
 date_stamp=$(date -u +"%Y-%m-%d")
-backupfile="shibuya-schedule-${date_stamp}.html"
-textfile="shibuya-schedule-${date_stamp}.txt"
+backupfile="./tmp/shibuya-schedule-${date_stamp}.html"
+textfile="./tmp/shibuya-schedule-${date_stamp}.txt"
 csvfile="./data/shibuya-schedule-${date_stamp}.csv"
 logfile="./logs/script-execution-${date_stamp}.log"
 llm_input_file="./logs/llm-input-${date_stamp}.txt"
@@ -92,12 +93,27 @@ download_webpage() {
 	backupfile="$local_html_file"
 	log_message "Skipping download step."
     else
-	log_message "Downloading webpage to $backupfile..."
-	if curl -s -L --fail https://www.shibuyahifi.com/hifi-schedule -o "$backupfile"; then
-	    log_message "Download successful."
+	# Try using Playwright to fetch rendered page (handles JavaScript)
+	if command -v node &> /dev/null && [[ -f src/fetch-schedule.js ]]; then
+	    log_message "Downloading rendered page with JavaScript support..."
+	    if node src/fetch-schedule.js; then
+		backupfile="./tmp/shibuya-schedule-rendered.html"
+		log_message "Downloaded rendered page successfully."
+	    else
+		log_message "WARNING: Playwright fetch failed, falling back to curl..."
+		if ! curl -s -L --fail https://www.shibuyahifi.com/hifi-schedule -o "$backupfile"; then
+		    log_message "ERROR: Failed to download webpage."
+		    exit 1
+		fi
+	    fi
 	else
-	    log_message "ERROR: Failed to download webpage."
-	    exit 1
+	    log_message "Downloading webpage with curl to $backupfile..."
+	    if curl -s -L --fail https://www.shibuyahifi.com/hifi-schedule -o "$backupfile"; then
+		log_message "Download successful (note: JavaScript content may not be rendered)."
+	    else
+		log_message "ERROR: Failed to download webpage."
+		exit 1
+	    fi
 	fi
     fi
 }

@@ -1,0 +1,11 @@
+{
+  "name": "shibuya-hifi-uploader",
+  "version": "1.0.0",
+  "description": "Fetch and parse Shibuya Hi-Fi schedule",
+  "scripts": {
+    "fetch-schedule": "node fetch-schedule.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}

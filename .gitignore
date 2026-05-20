@@ -6,8 +6,8 @@ poetry.lock
 .cache
 .search_cache.pkl
 logs
+tmp/
 __pycache__/
 *.pyc
 .DS_Store
-simple_search.py
-test_spotify_auth.py
+node_modules/

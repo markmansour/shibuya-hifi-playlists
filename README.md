@@ -20,12 +20,19 @@ poetry run python ./src/shibuyahifi-uploader.py --input-file data.csv --dry-run
 ### 1. Install Dependencies
 
 ```bash
+# System dependencies
 brew install html2text
 brew install llm
 llm install llm-anthropic
 
+# Python dependencies
 poetry install
+
+# JavaScript dependencies (optional, but recommended for reliable page fetching)
+npm install
 ```
+
+**Note on Playwright:** The `npm install` step is optional but highly recommended. Playwright automatically handles the JavaScript-heavy Shibuya Hi-Fi schedule page and clicks "Load More" until all albums are loaded. Without it, the script falls back to `curl`, which may miss dynamically-loaded content.
 
 ### 2. Configure Spotify Credentials
 
@@ -85,7 +92,21 @@ poetry run python ./src/shibuyahifi-uploader.py --input-file data.csv --playlist
 ## How It Works
 
 ### 1. Download & Convert
-`create_new_playlist.sh` downloads the Shibuya Hi-Fi schedule and converts HTML to plain text.
+
+The Shibuya Hi-Fi schedule page is JavaScript-heavy and requires clicking "Load More" multiple times to load all albums. The script handles this automatically:
+
+**With Playwright (recommended):**
+- Loads the page in a headless browser
+- Automatically clicks "Load More" until all content loads
+- Saves the fully-rendered HTML for parsing
+- Fast and reliable
+
+**Without Playwright (fallback):**
+- Uses `curl` to download the page
+- May miss dynamically-loaded albums
+- Requires manual "Load More" clicks first
+
+Once downloaded, `html2text` converts the HTML to plain text for LLM parsing.
 
 ### 2. Parse with LLM
 Claude AI (claude-4-opus) parses the text and extracts albums as CSV:
