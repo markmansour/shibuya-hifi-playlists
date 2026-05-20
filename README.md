@@ -29,11 +29,15 @@ poetry install
 
 ### 2. Configure Spotify Credentials
 
-Create a Spotify app at [developer.spotify.com](https://developer.spotify.com/dashboard):
+Create a Spotify app at [developer.spotify.com/dashboard/create](https://developer.spotify.com/dashboard/create):
 
-1. Create a new app
-2. Copy the **Client ID** and **Client Secret**
-3. Set the Redirect URI to `https://localhost:8888/callback`
+1. Fill in the form:
+   - **App name:** `shibuyahifi-uploader`
+   - **App description:** `Upload the monthly Shibuya hifi lounge playlist`
+   - **Redirect URIs:** `http://127.0.0.1:8888/callback`
+   - **Which API/SDKs are you planning to use?** Check "Web API"
+3. Accept the terms and create
+4. Go to Settings and copy the **Client ID** and **Client Secret**
 
 Add credentials to `.env`:
 ```env
