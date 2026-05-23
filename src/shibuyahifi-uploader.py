@@ -92,40 +92,38 @@ def search_album(sp, artist, album, cache, dry_run=False, retry_count=0, max_ret
         return cached_result
 
     try:
-        # Try exact search first (new limit: max 10 per Spotify Feb 2026 API changes)
-        query = f"album:\"{album}\" artist:\"{artist}\""
-        results = sp.search(q=query, type='album', limit=1, offset=0)
+        # Try simplified search first (less restrictive, works more often)
+        simplified_query = f"{artist} {album}"
+        simplified_query = clean_string(simplified_query)
+        results = sp.search(q=simplified_query, type='album', limit=1, offset=0)
         albums_found = results['albums']['items']
 
         if not albums_found:
             # Try with "Vol." variations (Volume I → Vol.1, etc)
             album_with_vol = album.replace("Volume ", "Vol.")
             if album_with_vol != album:
-                query = f"album:\"{album_with_vol}\" artist:\"{artist}\""
-                results = sp.search(q=query, type='album', limit=1, offset=0)
+                simplified_query = f"{artist} {album_with_vol}"
+                simplified_query = clean_string(simplified_query)
+                time.sleep(5)
+                results = sp.search(q=simplified_query, type='album', limit=1, offset=0)
                 albums_found = results['albums']['items']
 
         if not albums_found:
             # Try with/without "The" prefix on artist name
             if not artist.startswith("The "):
                 artist_with_the = f"The {artist}"
-                query = f"album:\"{album}\" artist:\"{artist_with_the}\""
-                results = sp.search(q=query, type='album', limit=1, offset=0)
+                simplified_query = f"{artist_with_the} {album}"
+                simplified_query = clean_string(simplified_query)
+                time.sleep(5)
+                results = sp.search(q=simplified_query, type='album', limit=1, offset=0)
                 albums_found = results['albums']['items']
             elif artist.startswith("The "):
                 artist_without_the = artist[4:]
-                query = f"album:\"{album}\" artist:\"{artist_without_the}\""
-                results = sp.search(q=query, type='album', limit=1, offset=0)
+                simplified_query = f"{artist_without_the} {album}"
+                simplified_query = clean_string(simplified_query)
+                time.sleep(5)
+                results = sp.search(q=simplified_query, type='album', limit=1, offset=0)
                 albums_found = results['albums']['items']
-
-        if not albums_found:
-            # Fallback to simplified search without field filters
-            simplified_query = f"{artist} {album}"
-            simplified_query = clean_string(simplified_query)
-            # Short delay before second search (1-2 seconds within 30-second window)
-            time.sleep(1)
-            results = sp.search(q=simplified_query, type='album', limit=1, offset=0)
-            albums_found = results['albums']['items']
 
         # Cache the result (even if empty) to avoid re-searching
         cache.set(artist, album, albums_found)
@@ -136,8 +134,19 @@ def search_album(sp, artist, album, cache, dry_run=False, retry_count=0, max_ret
 
         # Check for rate limit (429) or gateway errors (502)
         if e.http_status == 429 or "502" in error_str:
-            # Try to extract Retry-After from response if available
-            retry_after = 2 ** (retry_count + 1)  # Default: exponential backoff (2, 4, 8 seconds)
+            # Extract Retry-After header from response if available
+            retry_after = None
+            if hasattr(e, 'headers') and e.headers:
+                retry_after = e.headers.get('Retry-After')
+                if retry_after:
+                    try:
+                        retry_after = int(retry_after)
+                    except (ValueError, TypeError):
+                        retry_after = None
+
+            # Fall back to exponential backoff if no header
+            if not retry_after:
+                retry_after = 2 ** (retry_count + 1)  # 2, 4, 8 seconds
 
             if retry_count < max_retries:
                 if not dry_run:
@@ -254,7 +263,7 @@ def main():
                 print(f"✗")
                 failed_albums.append((album['album'], album['artist'], "not found"))
             # Small delay between requests - respectful but not excessive
-            time.sleep(1)
+            time.sleep(5)  # Development Mode requires longer delays
 
         print(f"\n{'='*70}")
         print(f"Result: {found_count}/{len(albums)} albums found")
@@ -300,7 +309,7 @@ def main():
                 print(f"✗")
                 failed_albums.append((album['album'], album['artist'], "not found"))
             # Small delay between requests
-            time.sleep(1)
+            time.sleep(5)  # Development Mode requires longer delays
 
         print(f"\n{'='*70}")
         print(f"Complete: {added_count}/{len(albums)} albums added")

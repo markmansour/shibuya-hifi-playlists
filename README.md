@@ -50,9 +50,17 @@ Add credentials to `.env`:
 ```env
 CLIENT_ID=your_client_id_here
 CLIENT_SECRET=your_client_secret_here
+REDIRECT_URI=http://127.0.0.1:8888/callback
 ```
 
-**Note:** Development Mode apps have stricter rate limits (~3-5 requests/30 seconds). For production use with more frequent uploads, request Spotify to upgrade your app to Production Mode.
+**Important:** The `REDIRECT_URI` must match **exactly** what you registered in your Spotify app settings, including the protocol (http/https), domain, port, and path. Mismatches cause authentication failures.
+
+**Note:** Development Mode apps have stricter rate limits (~1-2 requests/minute). The script uses:
+- **Simplified search first** to reduce API calls
+- **Smart retries** using Spotify's `Retry-After` header
+- **Local caching** to build up successful searches over time
+
+For best results with Development Mode, run the script incrementally and let the cache build up across multiple sessions.
 
 ### 3. Claude API Key
 
@@ -151,14 +159,41 @@ Failed to find:
   • Some Album by Some Artist (not found)
 ```
 
+## Building Cache Incrementally (Development Mode)
+
+Development Mode apps have strict rate limits. The recommended workflow:
+
+1. **Run the script:**
+   ```bash
+   poetry run python ./src/shibuyahifi-uploader.py --input-file data.csv --dry-run
+   ```
+   It will find some albums, cache them, then hit rate limits.
+
+2. **Wait 15-30 minutes** for the quota to reset
+
+3. **Run again:**
+   ```bash
+   poetry run python ./src/shibuyahifi-uploader.py --input-file data.csv --dry-run
+   ```
+   It skips cached albums and searches for new ones. Cache grows.
+
+4. **Repeat** until all albums are cached and found
+
+The cache (`.search_cache.pkl`) persists, so each run adds more successful searches. Eventually all albums are cached and the playlist creation becomes instant.
+
 ## Troubleshooting
 
 ### "Rate limit" or "429" errors
 
-Development Mode has strict rate limits. Solutions:
-1. **Wait and retry** — The script handles retries automatically with exponential backoff
-2. **Clear cache** — If cache has many failed searches: `--clear-cache`
-3. **Request Production Mode** — Contact Spotify support to upgrade your app (requires justification of use)
+The script automatically:
+- Extracts `Retry-After` headers from Spotify responses
+- Falls back to exponential backoff if headers unavailable
+- Caches failures to avoid re-searching
+
+If you hit limits:
+1. **Wait** — Spotify's quota resets automatically
+2. **Clear cache** — If cache has old failed searches: `--clear-cache`
+3. **Request Production Mode** — Contact Spotify support to upgrade your app
 
 ### Album not found
 
