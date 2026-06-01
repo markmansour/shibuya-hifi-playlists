@@ -276,10 +276,9 @@ def main():
     else:
         # Create a new playlist
         print(f"Creating playlist: '{playlist_name}'")
-        user_id = sp.current_user()['id']
         playlist_description = f"Shibuya Hifi Room, Seattle - {month_year} playlist"
-        playlist = sp.user_playlist_create(user=user_id, name=playlist_name,
-                                           public=True, description=playlist_description)
+        playlist = sp.current_user_playlist_create(name=playlist_name,
+                                                   public=True, description=playlist_description)
         print(f"✓ Playlist created\n")
 
         # Search for each album and add the tracks to the playlist
