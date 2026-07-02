@@ -17,6 +17,11 @@ poetry run python ./src/shibuyahifi-uploader.py --input-file data.csv --dry-run
 
 ## Setup
 
+### Prerequisites
+
+- **Python 3.12 or higher** (required by Poetry configuration)
+- Homebrew (for system dependencies)
+
 ### 1. Install Dependencies
 
 ```bash
@@ -33,6 +38,8 @@ npm install
 ```
 
 **Note on Playwright:** The `npm install` step is optional but highly recommended. Playwright automatically handles the JavaScript-heavy Shibuya Hi-Fi schedule page and clicks "Load More" until all albums are loaded. Without it, the script falls back to `curl`, which may miss dynamically-loaded content.
+
+**Note on Python:** Poetry will automatically find a compatible Python 3.12+ installation. If you have multiple Python versions installed, Poetry uses the first compatible one it finds.
 
 ### 2. Configure Spotify Credentials
 
@@ -117,7 +124,7 @@ The Shibuya Hi-Fi schedule page is JavaScript-heavy and requires clicking "Load 
 Once downloaded, `html2text` converts the HTML to plain text for LLM parsing.
 
 ### 2. Parse with LLM
-Claude AI (claude-4-opus) parses the text and extracts albums as CSV:
+Claude AI (claude-sonnet-4.6) parses the text and extracts albums as CSV:
 ```
 date,artist,album,year
 "Wednesday Jun 1, 2026 12:30 AM","Miles Davis","Kind of Blue",1959

@@ -26,7 +26,7 @@ logfile="./logs/script-execution-${date_stamp}.log"
 llm_input_file="./logs/llm-input-${date_stamp}.txt"
 llm_output_file="./logs/llm-output-${date_stamp}.txt"
 llm_debug_script="./logs/debug-llm-${date_stamp}.sh"
-llm_model="claude-4-opus"
+llm_model="claude-sonnet-4.6"
 
 # Function to log messages
 log_message() {
@@ -168,7 +168,7 @@ echo "poetry run python ./src/shibuyahifi-uploader.py --input-file $csvfile.new"
 
 # Tips for modifying the prompt:
 echo "\nTo try with a modified system prompt:"
-echo "cat $textfile | llm -m claude-4-sonnet -s \"Your modified system prompt here\" > new_output.txt"
+echo "cat $textfile | llm -m $llm_model -s \"Your modified system prompt here\" > new_output.txt"
 EOF
 
     chmod +x "$llm_debug_script"
@@ -176,7 +176,7 @@ EOF
 
 # Parse text with llm to create CSV
 parse_with_llm() {
-    log_message "Parsing text with llm (claude-4-sonnet)..."
+    log_message "Parsing text with llm ($llm_model)..."
     log_message "Filtering for albums played in ${target_month} ${target_year}..."
 
     # Define the system prompt with target month and year
@@ -199,9 +199,9 @@ date,artist,album,year
     # Replace placeholders with actual values
     actual_prompt=$(echo "$system_prompt" | sed "s/TARGET_MONTH/$target_month/g" | sed "s/TARGET_YEAR/$target_year/g")
 
-    # Run llm with Claude 4 Sonnet and capture its response
-    log_message "Running llm with claude-4-sonnet..."
-    if cat "$textfile" | llm -m claude-4-opus -s "$actual_prompt" > "$llm_output_file"; then
+    # Run llm with Claude model and capture its response
+    log_message "Running llm with $llm_model..."
+    if cat "$textfile" | llm -m "$llm_model" -s "$actual_prompt" > "$llm_output_file"; then
 	log_message "LLM processing successful. Full response saved to $llm_output_file"
     else
 	log_message "ERROR: LLM parsing failed."
