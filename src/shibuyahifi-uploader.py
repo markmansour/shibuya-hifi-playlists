@@ -273,6 +273,7 @@ def main():
             album_name = album['album'][:40].ljust(40)
             artist_name = album['artist'][:20].ljust(20)
             print(f"[{i:2d}/{len(albums)}] {album_name} {artist_name}", end=" ", flush=True)
+            cache_hit = cache.get(album['artist'], album['album']) is not None
             albums_found = search_album(sp, album['artist'], album['album'], cache, dry_run=True)
             if albums_found:
                 album_id = albums_found[0]['id']
@@ -281,7 +282,8 @@ def main():
                     track_count = len(album_tracks['items'])
                     found_artist = albums_found[0]['artists'][0]['name']
                     found_album = albums_found[0]['name']
-                    print(f"✓")
+                    cache_label = "(cache)" if cache_hit else "(api)"
+                    print(f"✓ {cache_label}")
                     found_count += 1
                     if found_artist != album['artist'] or found_album != album['album']:
                         print(f"     → Found: '{found_album}' by {found_artist}")
@@ -289,7 +291,8 @@ def main():
                     print(f"✗")
                     failed_albums.append((album['album'], album['artist'], "rate limited"))
             else:
-                print(f"✗")
+                cache_label = "(cache)" if cache_hit else "(api)"
+                print(f"✗ {cache_label}")
                 failed_albums.append((album['album'], album['artist'], "not found"))
             # Small delay between requests - respectful but not excessive
             time.sleep(5)  # Development Mode requires longer delays
@@ -317,6 +320,7 @@ def main():
             album_name = album['album'][:40].ljust(40)
             artist_name = album['artist'][:20].ljust(20)
             print(f"[{i:2d}/{len(albums)}] {album_name} {artist_name}", end=" ", flush=True)
+            cache_hit = cache.get(album['artist'], album['album']) is not None
             albums_found = search_album(sp, album['artist'], album['album'], cache)
             if albums_found:
                 try:
@@ -326,7 +330,8 @@ def main():
                     sp.playlist_add_items(playlist_id=playlist['id'], items=track_uris)
                     found_artist = albums_found[0]['artists'][0]['name']
                     found_album = albums_found[0]['name']
-                    print(f"✓")
+                    cache_label = "(cache)" if cache_hit else "(api)"
+                    print(f"✓ {cache_label}")
                     added_count += 1
                     if found_artist != album['artist'] or found_album != album['album']:
                         print(f"     → Found: '{found_album}' by {found_artist}")
@@ -334,7 +339,8 @@ def main():
                     print(f"✗")
                     failed_albums.append((album['album'], album['artist'], "rate limited"))
             else:
-                print(f"✗")
+                cache_label = "(cache)" if cache_hit else "(api)"
+                print(f"✗ {cache_label}")
                 failed_albums.append((album['album'], album['artist'], "not found"))
             # Small delay between requests
             time.sleep(5)  # Development Mode requires longer delays
