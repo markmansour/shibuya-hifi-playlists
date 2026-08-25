@@ -85,10 +85,15 @@ def artist_matches(requested_artist, candidate_artists):
     return any(names_match(requested_artist, a['name'], min_ratio=0.90) for a in candidate_artists)
 
 
+def album_base_matches(requested_album, candidate_album):
+    """Check album identity only (ignoring any requested edition qualifier)."""
+    return names_match(requested_album, candidate_album, min_ratio=0.82)
+
+
 def album_matches(requested_album, candidate_album):
     """Check album identity, then enforce that any edition the user explicitly asked
     for (Deluxe, Anniversary, etc.) is actually present on the candidate."""
-    if not names_match(requested_album, candidate_album, min_ratio=0.82):
+    if not album_base_matches(requested_album, candidate_album):
         return False
 
     wanted_editions = requested_edition_keywords(requested_album)
@@ -102,11 +107,21 @@ def album_matches(requested_album, candidate_album):
 
 def verify_candidates(candidates, artist, album):
     """Filter search results down to ones that actually are the requested
-    artist/album, rejecting garbage matches Spotify's relevance ranking let through."""
-    return [
-        c for c in candidates
-        if artist_matches(artist, c['artists']) and album_matches(album, c['name'])
-    ]
+    artist/album, rejecting garbage matches Spotify's relevance ranking let through.
+
+    If the request names a specific edition (Deluxe, Anniversary, etc.) but no
+    candidate has that edition, fall back to the standard/base release rather
+    than reporting not-found."""
+    artist_verified = [c for c in candidates if artist_matches(artist, c['artists'])]
+
+    strict = [c for c in artist_verified if album_matches(album, c['name'])]
+    if strict:
+        return strict
+
+    if requested_edition_keywords(album):
+        return [c for c in artist_verified if album_base_matches(album, c['name'])]
+
+    return []
 
 
 def album_edition_score(album_name, requested_album):
