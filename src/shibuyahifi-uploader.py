@@ -6,6 +6,8 @@ import argparse
 import re
 import json
 import csv
+import unicodedata
+import difflib
 from datetime import datetime
 import time
 import sys
@@ -16,6 +18,95 @@ from pathlib import Path
 def clean_string(s):
     """Remove non-alphanumeric characters and return lowercase string"""
     return re.sub(r'[^a-zA-Z0-9\s]', '', s).lower()
+
+
+# Edition keywords, longest phrase first so "super deluxe" isn't shadowed by "deluxe".
+EDITION_KEYWORDS = ('super deluxe', 'special edition', 'anniversary', 'deluxe', 'expanded', 'remaster')
+
+
+def fold_unicode(s):
+    """Fold accented characters to their closest ASCII equivalent (Björk -> Bjork)."""
+    normalized = unicodedata.normalize('NFKD', s)
+    return ''.join(c for c in normalized if not unicodedata.combining(c))
+
+
+ROMAN_TO_ARABIC = {'i': '1', 'ii': '2', 'iii': '3', 'iv': '4', 'v': '5',
+                   'vi': '6', 'vii': '7', 'viii': '8', 'ix': '9', 'x': '10'}
+
+
+def canonical_title(s):
+    """Normalize a title for identity comparison: fold accents, drop edition/parenthetical
+    noise, collapse punctuation, normalize volume/roman-numeral variants, lowercase. Two
+    titles that are 'the same album' should produce the same canonical form."""
+    s = fold_unicode(s)
+    s = re.sub(r'[\(\[][^\)\]]*[\)\]]', ' ', s)  # drop parenthetical/bracketed suffixes
+    s = re.sub(r'&', ' and ', s)
+    s = re.sub(r'\bvol(ume)?\.?\b', ' vol ', s, flags=re.IGNORECASE)
+    s = re.sub(r'[^a-zA-Z0-9\s]', ' ', s)
+    s = re.sub(r'\s+', ' ', s).strip().lower()
+    s = ' '.join(ROMAN_TO_ARABIC.get(tok, tok) for tok in s.split())
+    return s
+
+
+def requested_edition_keywords(requested_title):
+    """Which edition keywords (if any) did the user explicitly ask for?"""
+    lower = requested_title.lower()
+    return {kw for kw in EDITION_KEYWORDS if kw in lower}
+
+
+def names_match(requested, candidate, min_ratio):
+    """True if two names are the same identity: exact/token-containment match first,
+    falling back to fuzzy similarity only for longer strings (short strings like 'AM'
+    or 'SOS' are too easy to false-positive on with pure sequence similarity)."""
+    req_canon = canonical_title(requested)
+    cand_canon = canonical_title(candidate)
+
+    if not req_canon or not cand_canon:
+        return False
+
+    if req_canon == cand_canon:
+        return True
+
+    req_tokens = set(req_canon.split())
+    cand_tokens = set(cand_canon.split())
+    if req_tokens and (req_tokens <= cand_tokens or cand_tokens <= req_tokens):
+        return True
+
+    if len(req_canon) < 5 or len(cand_canon) < 5:
+        return False
+
+    ratio = difflib.SequenceMatcher(None, req_canon, cand_canon).ratio()
+    return ratio >= min_ratio
+
+
+def artist_matches(requested_artist, candidate_artists):
+    """Check requested artist against every credited artist on the candidate (handles
+    collabs/features like 'Khruangbin and Leon Bridges')."""
+    return any(names_match(requested_artist, a['name'], min_ratio=0.90) for a in candidate_artists)
+
+
+def album_matches(requested_album, candidate_album):
+    """Check album identity, then enforce that any edition the user explicitly asked
+    for (Deluxe, Anniversary, etc.) is actually present on the candidate."""
+    if not names_match(requested_album, candidate_album, min_ratio=0.82):
+        return False
+
+    wanted_editions = requested_edition_keywords(requested_album)
+    if wanted_editions:
+        candidate_lower = candidate_album.lower()
+        if not any(kw in candidate_lower for kw in wanted_editions):
+            return False
+
+    return True
+
+
+def verify_candidates(candidates, artist, album):
+    """Filter search results down to ones that actually are the requested
+    artist/album, rejecting garbage matches Spotify's relevance ranking let through."""
+    return [
+        c for c in candidates
+        if artist_matches(artist, c['artists']) and album_matches(album, c['name'])
+    ]
 
 
 def album_edition_score(album_name, requested_album):
@@ -112,13 +203,15 @@ def search_album(sp, artist, album, cache, dry_run=False, retry_count=0, max_ret
         return cached_result
 
     try:
+        verified = []
+
         # Try simplified search first (less restrictive, works more often)
         simplified_query = f"{artist} {album}"
         simplified_query = clean_string(simplified_query)
         results = sp.search(q=simplified_query, type='album', limit=5, offset=0)
-        albums_found = results['albums']['items']
+        verified = verify_candidates(results['albums']['items'], artist, album)
 
-        if not albums_found:
+        if not verified:
             # Try with "Vol." variations (Volume I → Vol.1, etc)
             album_with_vol = album.replace("Volume ", "Vol.")
             if album_with_vol != album:
@@ -126,9 +219,9 @@ def search_album(sp, artist, album, cache, dry_run=False, retry_count=0, max_ret
                 simplified_query = clean_string(simplified_query)
                 time.sleep(5)
                 results = sp.search(q=simplified_query, type='album', limit=5, offset=0)
-                albums_found = results['albums']['items']
+                verified = verify_candidates(results['albums']['items'], artist, album)
 
-        if not albums_found:
+        if not verified:
             # Try with/without "The" prefix on artist name
             if not artist.startswith("The "):
                 artist_with_the = f"The {artist}"
@@ -136,27 +229,27 @@ def search_album(sp, artist, album, cache, dry_run=False, retry_count=0, max_ret
                 simplified_query = clean_string(simplified_query)
                 time.sleep(5)
                 results = sp.search(q=simplified_query, type='album', limit=5, offset=0)
-                albums_found = results['albums']['items']
+                verified = verify_candidates(results['albums']['items'], artist, album)
             elif artist.startswith("The "):
                 artist_without_the = artist[4:]
                 simplified_query = f"{artist_without_the} {album}"
                 simplified_query = clean_string(simplified_query)
                 time.sleep(5)
                 results = sp.search(q=simplified_query, type='album', limit=5, offset=0)
-                albums_found = results['albums']['items']
+                verified = verify_candidates(results['albums']['items'], artist, album)
 
         # Prefer remastered editions over deluxe/anniversary/expanded editions,
         # keeping Spotify's relevance order as the tiebreaker.
-        if albums_found:
-            albums_found = sorted(
-                albums_found,
+        if verified:
+            verified = sorted(
+                verified,
                 key=lambda a: album_edition_score(a['name'], album),
                 reverse=True
             )
 
         # Cache the result (even if empty) to avoid re-searching
-        cache.set(artist, album, albums_found)
-        return albums_found
+        cache.set(artist, album, verified)
+        return verified
 
     except spotipy.exceptions.SpotifyException as e:
         error_str = str(e).lower()
