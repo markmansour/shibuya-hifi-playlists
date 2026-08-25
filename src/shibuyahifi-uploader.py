@@ -18,6 +18,26 @@ def clean_string(s):
     return re.sub(r'[^a-zA-Z0-9\s]', '', s).lower()
 
 
+def album_edition_score(album_name, requested_album):
+    """Score an album result so remastered editions are preferred over
+    deluxe/anniversary/expanded editions, unless the requested album name
+    itself asked for one of those editions."""
+    name_lower = album_name.lower()
+    requested_lower = requested_album.lower()
+
+    score = 0
+
+    if 'remaster' in name_lower:
+        score += 10
+
+    other_edition_keywords = ('deluxe', 'anniversary', 'expanded', 'super deluxe', 'special edition')
+    for keyword in other_edition_keywords:
+        if keyword in name_lower and keyword not in requested_lower:
+            score -= 5
+
+    return score
+
+
 class SearchCache:
     """Cache search results to avoid repeated API calls"""
     def __init__(self, cache_file=".search_cache.pkl"):
@@ -95,7 +115,7 @@ def search_album(sp, artist, album, cache, dry_run=False, retry_count=0, max_ret
         # Try simplified search first (less restrictive, works more often)
         simplified_query = f"{artist} {album}"
         simplified_query = clean_string(simplified_query)
-        results = sp.search(q=simplified_query, type='album', limit=1, offset=0)
+        results = sp.search(q=simplified_query, type='album', limit=5, offset=0)
         albums_found = results['albums']['items']
 
         if not albums_found:
@@ -105,7 +125,7 @@ def search_album(sp, artist, album, cache, dry_run=False, retry_count=0, max_ret
                 simplified_query = f"{artist} {album_with_vol}"
                 simplified_query = clean_string(simplified_query)
                 time.sleep(5)
-                results = sp.search(q=simplified_query, type='album', limit=1, offset=0)
+                results = sp.search(q=simplified_query, type='album', limit=5, offset=0)
                 albums_found = results['albums']['items']
 
         if not albums_found:
@@ -115,15 +135,24 @@ def search_album(sp, artist, album, cache, dry_run=False, retry_count=0, max_ret
                 simplified_query = f"{artist_with_the} {album}"
                 simplified_query = clean_string(simplified_query)
                 time.sleep(5)
-                results = sp.search(q=simplified_query, type='album', limit=1, offset=0)
+                results = sp.search(q=simplified_query, type='album', limit=5, offset=0)
                 albums_found = results['albums']['items']
             elif artist.startswith("The "):
                 artist_without_the = artist[4:]
                 simplified_query = f"{artist_without_the} {album}"
                 simplified_query = clean_string(simplified_query)
                 time.sleep(5)
-                results = sp.search(q=simplified_query, type='album', limit=1, offset=0)
+                results = sp.search(q=simplified_query, type='album', limit=5, offset=0)
                 albums_found = results['albums']['items']
+
+        # Prefer remastered editions over deluxe/anniversary/expanded editions,
+        # keeping Spotify's relevance order as the tiebreaker.
+        if albums_found:
+            albums_found = sorted(
+                albums_found,
+                key=lambda a: album_edition_score(a['name'], album),
+                reverse=True
+            )
 
         # Cache the result (even if empty) to avoid re-searching
         cache.set(artist, album, albums_found)
