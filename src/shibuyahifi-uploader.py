@@ -105,13 +105,43 @@ def album_matches(requested_album, candidate_album):
     return True
 
 
-def verify_candidates(candidates, artist, album):
+def split_artist_names(artist):
+    """Split a multi-artist credit ('A, B and C', 'A & B') into individual names."""
+    return [n.strip() for n in re.split(r',|&|\band\b', artist) if n.strip()]
+
+
+def is_various_artists_match(candidate, artist, album, track_artists):
+    """A compilation credited to 'Various Artists' (e.g. 'Passion, Grace & Fire').
+    The album artist gives no signal, so require the title to match and the
+    requested artist to be credited on at least one track."""
+    if not (len(candidate['artists']) == 1
+            and canonical_title(candidate['artists'][0]['name']) == 'various artists'
+            and canonical_title(candidate['name']) == canonical_title(album)):
+        return False
+    return any(artist_matches(artist, artists) for artists in track_artists(candidate['id']))
+
+
+def is_artist_album_swap(candidate, artist, album):
+    """The requested album is the candidate's artist, and every requested artist
+    name appears in the candidate's title (e.g. requested 'Black Star' by
+    'Mos Def and Talib Kweli' -> 'Mos Def & Talib Kweli Are Black Star' by 'Black Star')."""
+    if not any(names_match(album, a['name'], min_ratio=0.90) for a in candidate['artists']):
+        return False
+    title_tokens = set(canonical_title(candidate['name']).split())
+    names = split_artist_names(artist)
+    return bool(names) and all(set(canonical_title(n).split()) <= title_tokens for n in names)
+
+
+def verify_candidates(candidates, artist, album, track_artists=lambda album_id: []):
     """Filter search results down to ones that actually are the requested
     artist/album, rejecting garbage matches Spotify's relevance ranking let through.
 
     If the request names a specific edition (Deluxe, Anniversary, etc.) but no
     candidate has that edition, fall back to the standard/base release rather
-    than reporting not-found."""
+    than reporting not-found.
+
+    track_artists(album_id) returns each track's artist list; it's only called
+    to confirm 'Various Artists' compilations."""
     artist_verified = [c for c in candidates if artist_matches(artist, c['artists'])]
 
     strict = [c for c in artist_verified if album_matches(album, c['name'])]
@@ -119,9 +149,13 @@ def verify_candidates(candidates, artist, album):
         return strict
 
     if requested_edition_keywords(album):
-        return [c for c in artist_verified if album_base_matches(album, c['name'])]
+        base = [c for c in artist_verified if album_base_matches(album, c['name'])]
+        if base:
+            return base
 
-    return []
+    return [c for c in candidates
+            if is_artist_album_swap(c, artist, album)
+            or is_various_artists_match(c, artist, album, track_artists)]
 
 
 def album_edition_score(album_name, requested_album):
@@ -166,12 +200,16 @@ class SearchCache:
             pickle.dump(self.cache, f)
 
     def get(self, artist, album):
-        """Get cached result for artist:album"""
+        """Get cached result for artist:album. Empty results (left by older
+        versions that cached misses) count as a miss so they get re-searched."""
         key = f"{artist.lower()}:{album.lower()}"
-        return self.cache.get(key)
+        return self.cache.get(key) or None
 
     def set(self, artist, album, result):
-        """Cache a search result"""
+        """Cache a search result. Misses aren't cached: an album that isn't on
+        Spotify today (unreleased, or the matcher improves) should be retried."""
+        if not result:
+            return
         key = f"{artist.lower()}:{album.lower()}"
         self.cache[key] = result
         self._save_cache()
@@ -179,6 +217,74 @@ class SearchCache:
     def size(self):
         """Return cache size"""
         return len(self.cache)
+
+
+class SearchError(Exception):
+    """Search couldn't complete (rate limit, API error). Distinct from not-found."""
+
+
+SKIP = 'skip'
+
+
+def override_key(artist, album):
+    return f"{canonical_title(artist)}:{canonical_title(album)}"
+
+
+def load_overrides(file_path):
+    """Load manual album overrides from a CSV with columns artist,album,spotify_url.
+    spotify_url is an album URL/URI/ID, or 'skip' for albums not on Spotify."""
+    path = Path(file_path)
+    if not path.exists():
+        return {}
+    overrides = {}
+    with open(path, 'r', encoding='utf-8') as f:
+        for row in csv.DictReader(f):
+            target = (row.get('spotify_url') or '').strip()
+            if target:
+                overrides[override_key(row['artist'], row['album'])] = target
+    return overrides
+
+
+def album_id_from_url(target):
+    """Extract an album ID from an open.spotify.com URL, spotify: URI, or bare ID."""
+    match = re.search(r'album[/:]([A-Za-z0-9]+)', target)
+    return match.group(1) if match else target
+
+
+def resolve_album(sp, artist, album, cache, overrides, dry_run=False):
+    """Find the Spotify album for a schedule entry, checking manual overrides
+    before search. Returns the album dict, or SKIP for albums marked as not on
+    Spotify. Raises LookupError if not found, SearchError if search failed."""
+    target = overrides.get(override_key(artist, album))
+    if target is not None:
+        if target.lower() == SKIP:
+            return SKIP
+        try:
+            return sp.album(album_id_from_url(target))
+        except spotipy.exceptions.SpotifyException as e:
+            raise SearchError(f"override lookup failed: {e}") from e
+
+    albums_found = search_album(sp, artist, album, cache, dry_run=dry_run)
+    if not albums_found:
+        raise LookupError("not found")
+    return albums_found[0]
+
+
+def album_track_uris(sp, album_id):
+    """All track URIs on an album (album_tracks pages at 50; the default is 20)."""
+    page = sp.album_tracks(album_id, limit=50)
+    uris = [t['uri'] for t in page['items']]
+    while page['next']:
+        page = sp.next(page)
+        uris.extend(t['uri'] for t in page['items'])
+    return uris
+
+
+def describe_error(e):
+    """Short failure reason for the summary."""
+    if isinstance(e, spotipy.exceptions.SpotifyException) and e.http_status == 429:
+        return "rate limited"
+    return str(e) or type(e).__name__
 
 
 def load_playlist_data(file_path):
@@ -217,6 +323,9 @@ def search_album(sp, artist, album, cache, dry_run=False, retry_count=0, max_ret
     if cached_result is not None:
         return cached_result
 
+    def track_artists(album_id):
+        return [t['artists'] for t in sp.album_tracks(album_id, limit=50)['items']]
+
     try:
         verified = []
 
@@ -224,7 +333,7 @@ def search_album(sp, artist, album, cache, dry_run=False, retry_count=0, max_ret
         simplified_query = f"{artist} {album}"
         simplified_query = clean_string(simplified_query)
         results = sp.search(q=simplified_query, type='album', limit=5, offset=0)
-        verified = verify_candidates(results['albums']['items'], artist, album)
+        verified = verify_candidates(results['albums']['items'], artist, album, track_artists)
 
         if not verified:
             # Try with "Vol." variations (Volume I → Vol.1, etc)
@@ -234,7 +343,7 @@ def search_album(sp, artist, album, cache, dry_run=False, retry_count=0, max_ret
                 simplified_query = clean_string(simplified_query)
                 time.sleep(5)
                 results = sp.search(q=simplified_query, type='album', limit=5, offset=0)
-                verified = verify_candidates(results['albums']['items'], artist, album)
+                verified = verify_candidates(results['albums']['items'], artist, album, track_artists)
 
         if not verified:
             # Try with/without "The" prefix on artist name
@@ -244,14 +353,14 @@ def search_album(sp, artist, album, cache, dry_run=False, retry_count=0, max_ret
                 simplified_query = clean_string(simplified_query)
                 time.sleep(5)
                 results = sp.search(q=simplified_query, type='album', limit=5, offset=0)
-                verified = verify_candidates(results['albums']['items'], artist, album)
+                verified = verify_candidates(results['albums']['items'], artist, album, track_artists)
             elif artist.startswith("The "):
                 artist_without_the = artist[4:]
                 simplified_query = f"{artist_without_the} {album}"
                 simplified_query = clean_string(simplified_query)
                 time.sleep(5)
                 results = sp.search(q=simplified_query, type='album', limit=5, offset=0)
-                verified = verify_candidates(results['albums']['items'], artist, album)
+                verified = verify_candidates(results['albums']['items'], artist, album, track_artists)
 
         # Prefer remastered editions over deluxe/anniversary/expanded editions,
         # keeping Spotify's relevance order as the tiebreaker.
@@ -291,15 +400,13 @@ def search_album(sp, artist, album, cache, dry_run=False, retry_count=0, max_ret
                 time.sleep(retry_after)
                 return search_album(sp, artist, album, cache, dry_run, retry_count + 1, max_retries)
             else:
-                # Cache failure so we don't retry endlessly
-                cache.set(artist, album, [])
-                return []
+                raise SearchError("rate limited") from e
         else:
-            raise
+            raise SearchError(f"search error: {e}") from e
+    except SearchError:
+        raise
     except Exception as e:
-        # Unexpected error - cache and skip
-        cache.set(artist, album, [])
-        return []
+        raise SearchError(f"search error: {e}") from e
 
 
 def main():
@@ -313,6 +420,8 @@ def main():
                         help='Path to input file (JSON or CSV) containing album list')
     parser.add_argument('--playlist-name',
                         help='Name for the playlist (optional, defaults to month-based name)')
+    parser.add_argument('--overrides', default='data/overrides.csv',
+                        help='CSV of manual artist,album,spotify_url overrides (default: data/overrides.csv)')
     args = parser.parse_args()
 
     # Clear cache if requested
@@ -345,8 +454,9 @@ def main():
                                                    scope=SCOPE),
                         retries=0)  # Disable auto-retries; we handle them manually
 
-    # Initialize search cache
+    # Initialize search cache and manual overrides
     cache = SearchCache()
+    overrides = load_overrides(args.overrides)
 
     try:
         # Load albums from file
@@ -371,96 +481,73 @@ def main():
     if args.dry_run:
         print("=== DRY RUN MODE ===")
         print(f"Playlist: '{playlist_name}'")
-        print(f"Albums: {len(albums)} | Cache: {cache.size()} entries")
-        print(f"Estimated time: ~{len(albums) * 2 // 60} minutes\n")
-
-        # Search for each album without creating playlist or adding tracks
-        found_count = 0
-        failed_albums = []
-        for i, album in enumerate(albums, 1):
-            album_name = album['album'][:40].ljust(40)
-            artist_name = album['artist'][:20].ljust(20)
-            print(f"[{i:2d}/{len(albums)}] {album_name} {artist_name}", end=" ", flush=True)
-            cache_hit = cache.get(album['artist'], album['album']) is not None
-            albums_found = search_album(sp, album['artist'], album['album'], cache, dry_run=True)
-            if albums_found:
-                album_id = albums_found[0]['id']
-                try:
-                    album_tracks = sp.album_tracks(album_id)
-                    track_count = len(album_tracks['items'])
-                    found_artist = albums_found[0]['artists'][0]['name']
-                    found_album = albums_found[0]['name']
-                    cache_label = "(cache)" if cache_hit else "(api)"
-                    print(f"✓ {cache_label}")
-                    found_count += 1
-                    if found_artist != album['artist'] or found_album != album['album']:
-                        print(f"     → Found: '{found_album}' by {found_artist}")
-                except Exception as e:
-                    print(f"✗")
-                    failed_albums.append((album['album'], album['artist'], "rate limited"))
-            else:
-                cache_label = "(cache)" if cache_hit else "(api)"
-                print(f"✗ {cache_label}")
-                failed_albums.append((album['album'], album['artist'], "not found"))
-            # Small delay between requests - respectful but not excessive
-            time.sleep(5)  # Development Mode requires longer delays
-
-        print(f"\n{'='*70}")
-        print(f"Result: {found_count}/{len(albums)} albums found")
-        if failed_albums:
-            print(f"\nFailed to find:")
-            for album_name, artist_name, reason in failed_albums:
-                print(f"  • {album_name} by {artist_name} ({reason})")
-        print(f"\nCache: {cache.size()} entries")
-
+        print(f"Albums: {len(albums)} | Cache: {cache.size()} entries | Overrides: {len(overrides)}")
+        uncached = sum(1 for a in albums
+                       if override_key(a['artist'], a['album']) not in overrides
+                       and cache.get(a['artist'], a['album']) is None)
+        print(f"Estimated time: ~{uncached * 5 // 60} minutes\n")
+        playlist = None
     else:
-        # Create a new playlist
         print(f"Creating playlist: '{playlist_name}'")
         playlist_description = f"Shibuya Hifi Room, Seattle - {month_year} playlist"
         playlist = sp.current_user_playlist_create(name=playlist_name,
                                                    public=True, description=playlist_description)
         print(f"✓ Playlist created\n")
 
-        # Search for each album and add the tracks to the playlist
-        added_count = 0
-        failed_albums = []
-        for i, album in enumerate(albums, 1):
-            album_name = album['album'][:40].ljust(40)
-            artist_name = album['artist'][:20].ljust(20)
-            print(f"[{i:2d}/{len(albums)}] {album_name} {artist_name}", end=" ", flush=True)
-            cache_hit = cache.get(album['artist'], album['album']) is not None
-            albums_found = search_album(sp, album['artist'], album['album'], cache)
-            if albums_found:
-                try:
-                    album_id = albums_found[0]['id']
-                    album_tracks = sp.album_tracks(album_id)
-                    track_uris = [track['uri'] for track in album_tracks['items']]
-                    sp.playlist_add_items(playlist_id=playlist['id'], items=track_uris)
-                    found_artist = albums_found[0]['artists'][0]['name']
-                    found_album = albums_found[0]['name']
-                    cache_label = "(cache)" if cache_hit else "(api)"
-                    print(f"✓ {cache_label}")
-                    added_count += 1
-                    if found_artist != album['artist'] or found_album != album['album']:
-                        print(f"     → Found: '{found_album}' by {found_artist}")
-                except Exception as e:
-                    print(f"✗")
-                    failed_albums.append((album['album'], album['artist'], "rate limited"))
-            else:
-                cache_label = "(cache)" if cache_hit else "(api)"
-                print(f"✗ {cache_label}")
-                failed_albums.append((album['album'], album['artist'], "not found"))
-            # Small delay between requests
-            time.sleep(5)  # Development Mode requires longer delays
+    found_count = 0
+    failed_albums = []
+    skipped_albums = []
+    for i, album in enumerate(albums, 1):
+        album_name = album['album'][:40].ljust(40)
+        artist_name = album['artist'][:20].ljust(20)
+        print(f"[{i:2d}/{len(albums)}] {album_name} {artist_name}", end=" ", flush=True)
 
-        print(f"\n{'='*70}")
-        print(f"Complete: {added_count}/{len(albums)} albums added")
-        if failed_albums:
-            print(f"\nFailed to add:")
-            for album_name, artist_name, reason in failed_albums:
-                print(f"  • {album_name} by {artist_name} ({reason})")
-        print(f"\nPlaylist: https://open.spotify.com/playlist/{playlist['id']}")
+        if override_key(album['artist'], album['album']) in overrides:
+            source_label = "(override)"
+        elif cache.get(album['artist'], album['album']) is not None:
+            source_label = "(cache)"
+        else:
+            source_label = "(api)"
 
+        try:
+            found = resolve_album(sp, album['artist'], album['album'], cache, overrides, dry_run=args.dry_run)
+            if found == SKIP:
+                print(f"– skipped {source_label}")
+                skipped_albums.append((album['album'], album['artist']))
+                continue
+            track_uris = album_track_uris(sp, found['id'])
+            if playlist:
+                for start in range(0, len(track_uris), 100):
+                    sp.playlist_add_items(playlist_id=playlist['id'], items=track_uris[start:start + 100])
+        except Exception as e:
+            print(f"✗ {source_label}")
+            failed_albums.append((album['album'], album['artist'], describe_error(e)))
+        else:
+            print(f"✓ {source_label}")
+            found_count += 1
+            found_artist = found['artists'][0]['name']
+            if found_artist != album['artist'] or found['name'] != album['album']:
+                print(f"     → Found: '{found['name']}' by {found_artist}")
+        finally:
+            # Development Mode requires longer delays between search requests.
+            # Cache hits and overrides don't search, so don't throttle them.
+            if source_label == "(api)":
+                time.sleep(5)
+
+    verb = "found" if args.dry_run else "added"
+    print(f"\n{'='*70}")
+    print(f"Result: {found_count}/{len(albums)} albums {verb}")
+    if skipped_albums:
+        print(f"\nSkipped (not on Spotify, per overrides):")
+        for album_name, artist_name in skipped_albums:
+            print(f"  • {album_name} by {artist_name}")
+    if failed_albums:
+        print(f"\nFailed:")
+        for album_name, artist_name, reason in failed_albums:
+            print(f"  • {album_name} by {artist_name} ({reason})")
+    print(f"\nCache: {cache.size()} entries")
+    if playlist:
+        print(f"Playlist: https://open.spotify.com/playlist/{playlist['id']}")
 
 if __name__ == "__main__":
     main()
