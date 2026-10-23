@@ -132,6 +132,18 @@ def is_artist_album_swap(candidate, artist, album):
     return bool(names) and all(set(canonical_title(n).split()) <= title_tokens for n in names)
 
 
+def is_title_subtitle_swap(candidate, artist, album):
+    """The schedule split 'Title – Subtitle' into artist and album, but Spotify
+    files it as 'Title (Subtitle)' (e.g. requested 'Hadestown' / 'Original Broadway
+    Cast Recording' -> 'Hadestown (Original Broadway Cast Recording)'). Require the
+    requested artist to be the candidate's whole base title and the requested album
+    to be its parenthetical."""
+    if canonical_title(candidate['name']) != canonical_title(artist):
+        return False
+    parentheticals = re.findall(r'[\(\[]([^\)\]]*)[\)\]]', candidate['name'])
+    return any(canonical_title(p) == canonical_title(album) for p in parentheticals)
+
+
 def verify_candidates(candidates, artist, album, track_artists=lambda album_id: []):
     """Filter search results down to ones that actually are the requested
     artist/album, rejecting garbage matches Spotify's relevance ranking let through.
@@ -155,6 +167,7 @@ def verify_candidates(candidates, artist, album, track_artists=lambda album_id: 
 
     return [c for c in candidates
             if is_artist_album_swap(c, artist, album)
+            or is_title_subtitle_swap(c, artist, album)
             or is_various_artists_match(c, artist, album, track_artists)]
 
 
