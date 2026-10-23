@@ -26,7 +26,7 @@ logfile="./logs/script-execution-${date_stamp}.log"
 llm_input_file="./logs/llm-input-${date_stamp}.txt"
 llm_output_file="./logs/llm-output-${date_stamp}.txt"
 llm_debug_script="./logs/debug-llm-${date_stamp}.sh"
-llm_model="claude-sonnet-4.6"
+llm_model="anthropic/claude-sonnet-5-5"
 
 # Function to log messages
 log_message() {
