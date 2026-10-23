@@ -28,7 +28,7 @@ poetry run python ./src/shibuyahifi-uploader.py --input-file data.csv --dry-run
 # System dependencies
 brew install html2text
 brew install llm
-llm install llm-anthropic
+llm install llm-anthropic   # required: llm only talks to Anthropic models through this plugin
 
 # Python dependencies
 poetry install
@@ -71,7 +71,16 @@ For best results with Development Mode, run the script incrementally and let the
 
 ### 3. Claude API Key
 
-Your Anthropic key is already configured with the `llm` tool and will be used automatically. No additional setup needed.
+The `llm` tool needs the [llm-anthropic](https://github.com/simonw/llm-anthropic) plugin (installed in step 1) and an Anthropic API key:
+
+```bash
+llm keys set anthropic     # paste your key when prompted
+llm models | grep -i anthropic   # confirm the plugin is loaded and list model IDs
+```
+
+Alternatively, set the `ANTHROPIC_API_KEY` environment variable.
+
+The model is set by `llm_model` in `create_new_playlist.sh` (currently `anthropic/claude-sonnet-5-5`). If `llm` reports an unknown model, the plugin isn't installed, or the ID isn't in the `llm models` output. Run `llm install -U llm-anthropic` to pick up newer models.
 
 ## Usage
 
@@ -124,7 +133,7 @@ The Shibuya Hi-Fi schedule page is JavaScript-heavy and requires clicking "Load 
 Once downloaded, `html2text` converts the HTML to plain text for LLM parsing.
 
 ### 2. Parse with LLM
-Claude AI (claude-sonnet-4.6) parses the text and extracts albums as CSV:
+Claude AI (claude-sonnet-5-5, via the `llm-anthropic` plugin) parses the text and extracts albums as CSV:
 ```
 date,artist,album,year
 "Wednesday Jun 1, 2026 12:30 AM","Miles Davis","Kind of Blue",1959
